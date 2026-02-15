@@ -107,19 +107,35 @@ function resolveAnnounceOrigin(
   return mergeDeliveryContext(requesterOrigin, deliveryContextFromSession(entry));
 }
 
+function buildAnnounceIdFromChildRun(params: {
+  childSessionKey: string;
+  childRunId: string;
+}): string {
+  return `v1:${params.childSessionKey}:${params.childRunId}`;
+}
+
+function buildAnnounceIdempotencyKey(announceId: string): string {
+  return `announce:${announceId}`;
+}
+
+function resolveQueueAnnounceId(item: AnnounceQueueItem): string {
+  const announceId = item.announceId?.trim();
+  if (announceId) {
+    return announceId;
+  }
+  // Backward-compatible fallback for queue items that predate announceId.
+  return `legacy:${item.sessionKey}:${item.enqueuedAt}`;
+}
+
 async function sendAnnounce(item: AnnounceQueueItem) {
   const requesterDepth = getSubagentDepthFromSessionStore(item.sessionKey);
   const requesterIsSubagent = requesterDepth >= 1;
   const origin = item.origin;
   const threadId =
     origin?.threadId != null && origin.threadId !== "" ? String(origin.threadId) : undefined;
-  // Use a deterministic idempotency key derived from the session key and
-  // enqueue timestamp so the gateway dedup cache catches duplicates when
-  // the announce is delivered via both the announce queue drain *and* the
-  // gateway-level message queue (which re-queues the callGateway "agent"
-  // call if the main session is still busy).
-  // See: https://github.com/openclaw/openclaw/issues/17122
-  const idempotencyKey = `announce:${item.sessionKey}:${item.enqueuedAt}`;
+  // Share one announce identity across direct and queued delivery paths so
+  // gateway dedupe suppresses true retries without collapsing distinct events.
+  const idempotencyKey = buildAnnounceIdempotencyKey(resolveQueueAnnounceId(item));
   await callGateway({
     method: "agent",
     params: {
@@ -170,6 +186,7 @@ function loadRequesterSessionEntry(requesterSessionKey: string) {
 
 async function maybeQueueSubagentAnnounce(params: {
   requesterSessionKey: string;
+  announceId?: string;
   triggerMessage: string;
   summaryLine?: string;
   requesterOrigin?: DeliveryContext;
@@ -206,6 +223,7 @@ async function maybeQueueSubagentAnnounce(params: {
     enqueueAnnounce({
       key: canonicalKey,
       item: {
+        announceId: params.announceId,
         prompt: params.triggerMessage,
         summaryLine: params.summaryLine,
         enqueuedAt: Date.now(),
@@ -550,8 +568,13 @@ export async function runSubagentAnnounceFlow(params: {
       replyInstruction,
     ].join("\n");
 
+    const announceId = buildAnnounceIdFromChildRun({
+      childSessionKey: params.childSessionKey,
+      childRunId: params.childRunId,
+    });
     const queued = await maybeQueueSubagentAnnounce({
       requesterSessionKey: targetRequesterSessionKey,
+      announceId,
       triggerMessage,
       summaryLine: taskLabel,
       requesterOrigin: targetRequesterOrigin,
@@ -575,7 +598,7 @@ export async function runSubagentAnnounceFlow(params: {
     // Use a deterministic idempotency key so the gateway dedup cache
     // catches duplicates if this announce is also queued by the gateway-
     // level message queue while the main session is busy (#17122).
-    const directIdempotencyKey = `announce:${params.childSessionKey}:${params.childRunId}`;
+    const directIdempotencyKey = buildAnnounceIdempotencyKey(announceId);
     await callGateway({
       method: "agent",
       params: {
