@@ -16,6 +16,11 @@ import {
   normalizeDeliveryContext,
 } from "../utils/delivery-context.js";
 import {
+  buildAnnounceIdFromChildRun,
+  buildAnnounceIdempotencyKey,
+  resolveQueueAnnounceId,
+} from "./announce-idempotency.js";
+import {
   isEmbeddedPiRunActive,
   queueEmbeddedPiMessage,
   waitForEmbeddedPiRunEnd,
@@ -106,26 +111,6 @@ function resolveAnnounceOrigin(
   return mergeDeliveryContext(requesterOrigin, deliveryContextFromSession(entry));
 }
 
-function buildAnnounceIdFromChildRun(params: {
-  childSessionKey: string;
-  childRunId: string;
-}): string {
-  return `v1:${params.childSessionKey}:${params.childRunId}`;
-}
-
-function buildAnnounceIdempotencyKey(announceId: string): string {
-  return `announce:${announceId}`;
-}
-
-function resolveQueueAnnounceId(item: AnnounceQueueItem): string {
-  const announceId = item.announceId?.trim();
-  if (announceId) {
-    return announceId;
-  }
-  // Backward-compatible fallback for queue items that predate announceId.
-  return `legacy:${item.sessionKey}:${item.enqueuedAt}`;
-}
-
 async function sendAnnounce(item: AnnounceQueueItem) {
   const requesterDepth = getSubagentDepthFromSessionStore(item.sessionKey);
   const requesterIsSubagent = requesterDepth >= 1;
@@ -134,7 +119,13 @@ async function sendAnnounce(item: AnnounceQueueItem) {
     origin?.threadId != null && origin.threadId !== "" ? String(origin.threadId) : undefined;
   // Share one announce identity across direct and queued delivery paths so
   // gateway dedupe suppresses true retries without collapsing distinct events.
-  const idempotencyKey = buildAnnounceIdempotencyKey(resolveQueueAnnounceId(item));
+  const idempotencyKey = buildAnnounceIdempotencyKey(
+    resolveQueueAnnounceId({
+      announceId: item.announceId,
+      sessionKey: item.sessionKey,
+      enqueuedAt: item.enqueuedAt,
+    }),
+  );
   await callGateway({
     method: "agent",
     params: {
