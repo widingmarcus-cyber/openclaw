@@ -1013,7 +1013,7 @@ describe("gateway server auth/connect", () => {
     }
   });
 
-  test("requires pairing for scope upgrades", async () => {
+  test("auto-approves scope upgrades for local clients", async () => {
     const { mkdtemp } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
@@ -1050,6 +1050,7 @@ describe("gateway server auth/connect", () => {
         nonce,
       };
     };
+    // Initial connect with operator.read
     const initialNonce = await readConnectChallengeNonce(ws);
     const initial = await connectReq(ws, {
       token: "secret",
@@ -1066,6 +1067,7 @@ describe("gateway server auth/connect", () => {
 
     ws.close();
 
+    // Reconnect requesting operator.admin — should auto-approve for local client
     const ws2 = await openWs(port);
     const nonce2 = await readConnectChallengeNonce(ws2);
     const res = await connectReq(ws2, {
@@ -1074,25 +1076,12 @@ describe("gateway server auth/connect", () => {
       client,
       device: buildDevice(["operator.admin"], nonce2),
     });
-    expect(res.ok).toBe(false);
-    expect(res.error?.message ?? "").toContain("pairing required");
-
-    await approvePendingPairingIfNeeded();
-    ws2.close();
-
-    const ws3 = await openWs(port);
-    const nonce3 = await readConnectChallengeNonce(ws3);
-    const approved = await connectReq(ws3, {
-      token: "secret",
-      scopes: ["operator.admin"],
-      client,
-      device: buildDevice(["operator.admin"], nonce3),
-    });
-    expect(approved.ok).toBe(true);
+    // Local clients get scope upgrades auto-approved (silent pairing)
+    expect(res.ok).toBe(true);
     paired = await getPairedDevice(identity.deviceId);
     expect(paired?.scopes).toContain("operator.admin");
 
-    ws3.close();
+    ws2.close();
     await server.close();
     restoreGatewayToken(prevToken);
   });
@@ -1425,6 +1414,8 @@ describe("gateway server auth/connect", () => {
       delete legacy.scopes;
       await writeJsonAtomic(pairedPath, paired);
 
+      // Local clients get scope upgrades auto-approved even from legacy
+      // metadata, so the upgrade succeeds and paired scopes are updated.
       const wsUpgrade = await openWs(port);
       ws2 = wsUpgrade;
       const upgradeNonce = await readConnectChallengeNonce(wsUpgrade);
@@ -1434,20 +1425,9 @@ describe("gateway server auth/connect", () => {
         client,
         device: buildDevice(["operator.admin"], upgradeNonce),
       });
-      expect(upgraded.ok).toBe(false);
-      expect(upgraded.error?.message ?? "").toContain("pairing required");
-      wsUpgrade.close();
-
-      const pendingUpgrade = (await listDevicePairing()).pending.find(
-        (entry) => entry.deviceId === identity.deviceId,
-      );
-      expect(pendingUpgrade?.requestId).toBeDefined();
-      expect(pendingUpgrade?.scopes).toContain("operator.admin");
+      expect(upgraded.ok).toBe(true);
       const repaired = await getPairedDevice(identity.deviceId);
-      expect(repaired?.role).toBe("operator");
-      expect(repaired?.roles).toBeUndefined();
-      expect(repaired?.scopes).toBeUndefined();
-      expect(repaired?.approvedScopes).not.toContain("operator.admin");
+      expect(repaired?.scopes).toContain("operator.admin");
     } finally {
       ws.close();
       ws2?.close();
