@@ -1,0 +1,17 @@
+diff --git a/dist/providers/anthropic.js b/dist/providers/anthropic.js
+index 0bf2b894799bbc9ef5fda07bc44ea4301c9f395a..83ca4195993b3d0eaccb714cd454669589572251 100644
+--- a/dist/providers/anthropic.js
++++ b/dist/providers/anthropic.js
+@@ -586,7 +586,11 @@ function convertMessages(messages, model, isOAuthToken, cacheControl) {
+                     else {
+                         blocks.push({
+                             type: "thinking",
+-                            thinking: sanitizeSurrogates(block.thinking),
++                            // Do not sanitize thinking text when a signature is present.
++                            // The Anthropic API requires thinking blocks to be returned
++                            // verbatim; modifying the text invalidates the cryptographic
++                            // signature and causes 400 errors (#17019, #24612).
++                            thinking: block.thinking,
+                             signature: block.thinkingSignature,
+                         });
+                     }
