@@ -297,3 +297,37 @@ export function wrapWebContent(
   // Marker sanitization happens in wrapExternalContent
   return wrapExternalContent(content, { source, includeWarning });
 }
+
+/**
+ * Strips external content security markers and warnings from text.
+ * Intended for sanitizing assistant output before sending to users,
+ * preventing internal ARIA/browser snapshot markers from leaking
+ * into user-visible chat.
+ */
+export function stripExternalContentFromOutput(text: string): string {
+  if (!text) {
+    return text;
+  }
+  const lower = text.toLowerCase();
+  if (
+    !lower.includes("external_untrusted_content") &&
+    !lower.includes("security notice") &&
+    !lower.includes("marker_sanitized")
+  ) {
+    return text;
+  }
+  let result = text;
+  result = result.replace(
+    /<<<EXTERNAL_UNTRUSTED_CONTENT(?:\s+id="[^"]{1,128}")?\s*>>>[\s\S]*?<<<END_EXTERNAL_UNTRUSTED_CONTENT(?:\s+id="[^"]{1,128}")?\s*>>>\n?/gi,
+    "",
+  );
+  result = result.replace(/<<<EXTERNAL_UNTRUSTED_CONTENT(?:\s+id="[^"]{1,128}")?\s*>>>\n?/gi, "");
+  result = result.replace(
+    /<<<END_EXTERNAL_UNTRUSTED_CONTENT(?:\s+id="[^"]{1,128}")?\s*>>>\n?/gi,
+    "",
+  );
+  result = result.replace(/\[\[(?:END_)?MARKER_SANITIZED\]\]\n?/g, "");
+  result = result.replace(/SECURITY NOTICE:[^\n]*(?:\n[- \t][^\n]*)*/g, "");
+  result = result.replace(/\n{3,}/g, "\n\n");
+  return result.trim();
+}
