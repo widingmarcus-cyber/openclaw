@@ -8,6 +8,7 @@ import {
   buildModelAliasIndex,
   normalizeProviderId,
   modelKey,
+  buildConfiguredAllowlistKeys,
 } from "./model-selection.js";
 
 describe("model-selection", () => {
@@ -154,6 +155,47 @@ describe("model-selection", () => {
       expect(index.byAlias.get("smart")?.ref).toEqual({ provider: "openai", model: "gpt-4o" });
       expect(index.byKey.get(modelKey("anthropic", "claude-3-5-sonnet"))).toEqual(["fast"]);
     });
+
+    it("should resolve short-name keys with full-path aliases (Style B) (#20042)", () => {
+      const cfg: Partial<OpenClawConfig> = {
+        agents: {
+          defaults: {
+            models: {
+              flash: { alias: "google/gemini-2.5-flash" },
+              sonnet: { alias: "anthropic/claude-sonnet-4-6" },
+              opus: { alias: "anthropic/claude-opus-4-6" },
+            },
+          },
+        },
+      };
+
+      const index = buildModelAliasIndex({
+        cfg: cfg as OpenClawConfig,
+        defaultProvider: "anthropic",
+      });
+
+      expect(index.byAlias.get("flash")?.ref).toEqual({
+        provider: "google",
+        model: "gemini-2.5-flash",
+      });
+      expect(index.byAlias.get("sonnet")?.ref).toEqual({
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+      });
+      expect(index.byKey.get(modelKey("google", "gemini-2.5-flash"))).toEqual(["flash"]);
+
+      // End-to-end: resolveModelRefFromString with "flash" must find google model
+      const resolved = resolveModelRefFromString({
+        raw: "flash",
+        defaultProvider: "anthropic",
+        aliasIndex: index,
+      });
+      expect(resolved?.ref).toEqual({
+        provider: "google",
+        model: "gemini-2.5-flash",
+      });
+      expect(resolved?.alias).toBe("flash");
+    });
   });
 
   describe("resolveModelRefFromString", () => {
@@ -221,6 +263,32 @@ describe("model-selection", () => {
         defaultModel: "gpt-4",
       });
       expect(result).toEqual({ provider: "openai", model: "gpt-4" });
+    });
+  });
+
+  describe("buildConfiguredAllowlistKeys", () => {
+    it("should build correct allowlist keys for Style B configs (#20042)", () => {
+      const cfg: Partial<OpenClawConfig> = {
+        agents: {
+          defaults: {
+            models: {
+              flash: { alias: "google/gemini-2.5-flash" },
+              sonnet: { alias: "anthropic/claude-sonnet-4-6" },
+            },
+          },
+        },
+      };
+
+      const keys = buildConfiguredAllowlistKeys({
+        cfg: cfg as OpenClawConfig,
+        defaultProvider: "anthropic",
+      });
+
+      // Style B: "flash" key with "google/gemini-2.5-flash" alias
+      // Should produce "google/gemini-2.5-flash", NOT "anthropic/flash"
+      expect(keys?.has(modelKey("google", "gemini-2.5-flash"))).toBe(true);
+      expect(keys?.has(modelKey("anthropic", "claude-sonnet-4-6"))).toBe(true);
+      expect(keys?.has(modelKey("anthropic", "flash"))).toBe(false);
     });
   });
 });

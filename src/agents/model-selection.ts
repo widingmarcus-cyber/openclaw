@@ -168,6 +168,31 @@ export function parseModelRef(raw: string, defaultProvider: string): ModelRef | 
   return normalizeModelRef(providerRaw, model);
 }
 
+/**
+ * Resolves the actual model path from a config entry, handling both config styles:
+ *   Style A: key="anthropic/claude-3-5-sonnet", alias="fast" → model is key
+ *   Style B: key="flash", alias="google/gemini-2.5-flash" → model is alias
+ */
+function resolveModelPathFromConfigEntry(
+  keyRaw: string,
+  alias: string | undefined,
+  defaultProvider: string,
+): ModelRef | null {
+  const keyStr = keyRaw.trim();
+  const aliasStr = (alias ?? "").trim();
+  if (!aliasStr) {
+    return parseModelRef(keyStr, defaultProvider);
+  }
+  const keyHasSlash = keyStr.includes("/");
+  const aliasHasSlash = aliasStr.includes("/");
+  if (!keyHasSlash && aliasHasSlash) {
+    // Style B: key is short name, alias is full path
+    return parseModelRef(aliasStr, defaultProvider);
+  }
+  // Style A or ambiguous: key is the model specifier
+  return parseModelRef(keyStr, defaultProvider);
+}
+
 export function normalizeModelSelection(value: unknown): string | undefined {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -196,16 +221,23 @@ export function buildConfiguredAllowlistKeys(params: {
   cfg: OpenClawConfig | undefined;
   defaultProvider: string;
 }): Set<string> | null {
-  const rawAllowlist = Object.keys(params.cfg?.agents?.defaults?.models ?? {});
+  const modelMap = params.cfg?.agents?.defaults?.models ?? {};
+  const rawAllowlist = Object.keys(modelMap);
   if (rawAllowlist.length === 0) {
     return null;
   }
 
   const keys = new Set<string>();
   for (const raw of rawAllowlist) {
-    const key = resolveAllowlistModelKey(String(raw ?? ""), params.defaultProvider);
-    if (key) {
-      keys.add(key);
+    const entry = (modelMap as Record<string, { alias?: string } | undefined>)[raw];
+    const alias = entry?.alias;
+    const parsed = resolveModelPathFromConfigEntry(
+      String(raw ?? ""),
+      alias,
+      params.defaultProvider,
+    );
+    if (parsed) {
+      keys.add(modelKey(parsed.provider, parsed.model));
     }
   }
   return keys.size > 0 ? keys : null;
@@ -220,19 +252,41 @@ export function buildModelAliasIndex(params: {
 
   const rawModels = params.cfg.agents?.defaults?.models ?? {};
   for (const [keyRaw, entryRaw] of Object.entries(rawModels)) {
-    const parsed = parseModelRef(String(keyRaw ?? ""), params.defaultProvider);
-    if (!parsed) {
-      continue;
-    }
     const alias = String((entryRaw as { alias?: string } | undefined)?.alias ?? "").trim();
     if (!alias) {
       continue;
     }
-    const aliasKey = normalizeAliasKey(alias);
-    byAlias.set(aliasKey, { alias, ref: parsed });
+    const keyStr = String(keyRaw ?? "").trim();
+    // Determine which value is the short name and which is the full model path.
+    // Style A: key is full path ("google/gemini-2.5-flash"), alias is short name ("flash")
+    // Style B: key is short name ("flash"), alias is full path ("google/gemini-2.5-flash")
+    const keyHasSlash = keyStr.includes("/");
+    const aliasHasSlash = alias.includes("/");
+    let shortName: string;
+    let fullModelPath: string;
+    if (!keyHasSlash && aliasHasSlash) {
+      // Style B: key="flash", alias="google/gemini-2.5-flash"
+      shortName = keyStr;
+      fullModelPath = alias;
+    } else if (keyHasSlash && !aliasHasSlash) {
+      // Style A: key="anthropic/claude-3-5-sonnet", alias="fast"
+      shortName = alias;
+      fullModelPath = keyStr;
+    } else {
+      // Ambiguous: both or neither have slashes — fall back to treating key as
+      // the model specifier and alias as the short name (legacy behavior)
+      shortName = alias;
+      fullModelPath = keyStr;
+    }
+    const parsed = parseModelRef(fullModelPath, params.defaultProvider);
+    if (!parsed) {
+      continue;
+    }
+    const aliasKey = normalizeAliasKey(shortName);
+    byAlias.set(aliasKey, { alias: shortName, ref: parsed });
     const key = modelKey(parsed.provider, parsed.model);
     const existing = byKey.get(key) ?? [];
-    existing.push(alias);
+    existing.push(shortName);
     byKey.set(key, existing);
   }
 
@@ -398,8 +452,11 @@ export function buildAllowedModelSet(params: {
 
   const allowedKeys = new Set<string>();
   const configuredProviders = (params.cfg.models?.providers ?? {}) as Record<string, unknown>;
+  const modelMap = params.cfg.agents?.defaults?.models ?? {};
   for (const raw of rawAllowlist) {
-    const parsed = parseModelRef(String(raw), params.defaultProvider);
+    const entry = (modelMap as Record<string, { alias?: string } | undefined>)[raw];
+    const alias = entry?.alias;
+    const parsed = resolveModelPathFromConfigEntry(String(raw), alias, params.defaultProvider);
     if (!parsed) {
       continue;
     }
