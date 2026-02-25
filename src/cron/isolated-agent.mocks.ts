@@ -15,6 +15,18 @@ vi.mock("../agents/model-selection.js", async (importOriginal) => {
   return {
     ...actual,
     isCliProvider: vi.fn(() => false),
+    resolveAllowedModelRef: vi.fn(({ raw }) => {
+      const trimmed = raw.trim();
+      // Handle invalid model formats
+      if (!trimmed || trimmed.endsWith("/") || !trimmed.includes("/")) {
+        return { error: `invalid model: ${trimmed}` };
+      }
+      const [provider, model] = trimmed.split("/");
+      if (!provider || !model) {
+        return { error: `invalid model: ${trimmed}` };
+      }
+      return { ref: { provider, model }, key: raw };
+    }),
   };
 });
 

@@ -73,6 +73,7 @@ type RunCronTurnOptions = {
   cfgOverrides?: Parameters<typeof makeCfg>[2];
   deps?: CliDeps;
   jobPayload?: CronJob["payload"];
+  jobOverrides?: Partial<CronJob>;
   message?: string;
   mockTexts?: string[] | null;
   sessionKey?: string;
@@ -100,10 +101,11 @@ async function runCronTurn(home: string, options: RunCronTurnOptions = {}) {
   }
 
   const jobPayload = options.jobPayload ?? DEFAULT_AGENT_TURN_PAYLOAD;
+  const job = { ...makeJob(jobPayload), ...options.jobOverrides };
   const res = await runCronIsolatedAgentTurn({
     cfg: makeCfg(home, storePath, options.cfgOverrides),
     deps,
-    job: makeJob(jobPayload),
+    job,
     message:
       options.message ?? (jobPayload.kind === "agentTurn" ? jobPayload.message : DEFAULT_MESSAGE),
     sessionKey: options.sessionKey ?? DEFAULT_SESSION_KEY,
@@ -137,7 +139,17 @@ async function runTurnWithStoredModelOverride(
   modelOverride = "gpt-4.1-mini",
 ) {
   return runCronTurn(home, {
+    cfgOverrides: {
+      agents: {
+        defaults: {
+          model: "openai/gpt-4.1-mini", // Set default to match expected provider
+        },
+      },
+    },
     jobPayload,
+    jobOverrides: {
+      freshSession: false, // Preserve existing session overrides
+    },
     storeEntries: {
       "agent:main:cron:job-1": {
         sessionId: "existing-cron-session",

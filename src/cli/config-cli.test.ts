@@ -233,6 +233,65 @@ describe("config cli", () => {
     });
   });
 
+  describe("config set - precision loss guard (#22437)", () => {
+    it("preserves large integer strings (Discord Snowflake IDs) without precision loss", async () => {
+      const resolved: OpenClawConfig = { gateway: { port: 18789 } };
+      setSnapshot(resolved, resolved);
+
+      // Discord Snowflake ID exceeds Number.MAX_SAFE_INTEGER (2^53 - 1)
+      await runConfigCommand([
+        "config",
+        "set",
+        "channels.discord.execApprovals.approvers[0]",
+        "805422583936421918",
+      ]);
+
+      expect(mockWriteConfigFile).toHaveBeenCalledTimes(1);
+      const written = mockWriteConfigFile.mock.calls[0]?.[0];
+      const approvers = (written.channels?.discord as Record<string, unknown>)?.execApprovals as
+        | Record<string, unknown>
+        | undefined;
+      const firstApprover = (approvers?.approvers as unknown[])?.[0];
+      // Must remain the original string, not a truncated number
+      expect(firstApprover).toBe("805422583936421918");
+      expect(typeof firstApprover).toBe("string");
+    });
+
+    it("still parses safe integers as numbers", async () => {
+      const resolved: OpenClawConfig = { gateway: { port: 18789 } };
+      setSnapshot(resolved, resolved);
+
+      await runConfigCommand(["config", "set", "gateway.port", "3000"]);
+
+      expect(mockWriteConfigFile).toHaveBeenCalledTimes(1);
+      const written = mockWriteConfigFile.mock.calls[0]?.[0];
+      expect(written.gateway?.port).toBe(3000);
+      expect(typeof written.gateway?.port).toBe("number");
+    });
+
+    it("preserves large integers in --strict-json mode", async () => {
+      const resolved: OpenClawConfig = { gateway: { port: 18789 } };
+      setSnapshot(resolved, resolved);
+
+      await runConfigCommand([
+        "config",
+        "set",
+        "channels.discord.execApprovals.approvers[0]",
+        "805422583936421918",
+        "--strict-json",
+      ]);
+
+      expect(mockWriteConfigFile).toHaveBeenCalledTimes(1);
+      const written = mockWriteConfigFile.mock.calls[0]?.[0];
+      const approvers = (written.channels?.discord as Record<string, unknown>)?.execApprovals as
+        | Record<string, unknown>
+        | undefined;
+      const firstApprover = (approvers?.approvers as unknown[])?.[0];
+      expect(firstApprover).toBe("805422583936421918");
+      expect(typeof firstApprover).toBe("string");
+    });
+  });
+
   describe("config unset - issue #6070", () => {
     it("preserves existing config keys when unsetting a value", async () => {
       const resolved: OpenClawConfig = {

@@ -72,18 +72,32 @@ function parsePath(raw: string): PathSegment[] {
   return parts.map((part) => part.trim()).filter(Boolean);
 }
 
+/**
+ * Guard against JavaScript number precision loss for large integer strings
+ * (e.g. Discord Snowflake IDs like "805422583936421918").
+ * JSON5.parse coerces numeric strings to `number`, but 64-bit integers
+ * exceed Number.MAX_SAFE_INTEGER (2^53 - 1) and silently lose precision.
+ * When that happens, return the original string instead.
+ */
+function guardPrecisionLoss(parsed: unknown, raw: string): unknown {
+  if (typeof parsed === "number" && Number.isFinite(parsed) && String(parsed) !== raw) {
+    return raw;
+  }
+  return parsed;
+}
+
 function parseValue(raw: string, opts: ConfigSetParseOpts): unknown {
   const trimmed = raw.trim();
   if (opts.strictJson) {
     try {
-      return JSON5.parse(trimmed);
+      return guardPrecisionLoss(JSON5.parse(trimmed), trimmed);
     } catch (err) {
       throw new Error(`Failed to parse JSON5 value: ${String(err)}`, { cause: err });
     }
   }
 
   try {
-    return JSON5.parse(trimmed);
+    return guardPrecisionLoss(JSON5.parse(trimmed), trimmed);
   } catch {
     return raw;
   }
