@@ -3,6 +3,7 @@ import type { MessagingToolSend } from "../../agents/pi-embedded-runner.js";
 import type { ReplyToMode } from "../../config/types.js";
 import { normalizeTargetForProvider } from "../../infra/outbound/target-normalization.js";
 import { normalizeOptionalAccountId } from "../../routing/account-id.js";
+import { stripExternalContentFromOutput } from "../../security/external-content.js";
 import type { OriginatingChannelType } from "../templating.js";
 import type { ReplyPayload } from "../types.js";
 import { extractReplyToTag } from "./reply-tags.js";
@@ -85,6 +86,13 @@ export function applyReplyThreading(params: {
     .map((payload) =>
       resolveReplyThreadingForPayload({ payload, implicitReplyToId, currentMessageId }),
     )
+    .map((payload) => {
+      if (typeof payload.text === "string") {
+        const stripped = stripExternalContentFromOutput(payload.text);
+        return stripped !== payload.text ? { ...payload, text: stripped } : payload;
+      }
+      return payload;
+    })
     .filter(isRenderablePayload)
     .map(applyReplyToMode);
 }
