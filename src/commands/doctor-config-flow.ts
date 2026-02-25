@@ -647,6 +647,107 @@ function scanDiscordNumericIdEntries(cfg: OpenClawConfig): DiscordNumericIdHit[]
   return hits;
 }
 
+// ---------------------------------------------------------------------------
+// Invalid enum / literal union repair (#26836)
+// ---------------------------------------------------------------------------
+
+type InvalidUnionIssue = ZodIssue & {
+  code: "invalid_union";
+  errors: Array<Array<{ code: string; values?: unknown[] }>>;
+};
+
+function isInvalidUnionLiteralIssue(issue: ZodIssue): issue is InvalidUnionIssue {
+  if (issue.code !== "invalid_union") {
+    return false;
+  }
+  const errors = (issue as InvalidUnionIssue).errors;
+  if (!Array.isArray(errors) || errors.length === 0) {
+    return false;
+  }
+  // Every sub-error group must contain only `invalid_value` entries (literal mismatches).
+  return errors.every(
+    (group) =>
+      Array.isArray(group) &&
+      group.length > 0 &&
+      group.every((entry) => entry.code === "invalid_value"),
+  );
+}
+
+function collectAllowedLiterals(issue: InvalidUnionIssue): string[] {
+  const literals: string[] = [];
+  for (const group of issue.errors) {
+    for (const entry of group) {
+      if (Array.isArray(entry.values)) {
+        for (const v of entry.values) {
+          if (typeof v === "string" && !literals.includes(v)) {
+            literals.push(v);
+          }
+        }
+      }
+    }
+  }
+  return literals;
+}
+
+/**
+ * Detect and remove invalid enum/literal values that cause schema validation
+ * to fail hard (e.g. `compaction.mode = "aggressive"` when only "default" and
+ * "safeguard" are allowed).  Removing the value resets it to the schema
+ * default, which is safe because all such fields are `.optional()`.
+ */
+function maybeRepairInvalidEnumValues(cfg: OpenClawConfig): {
+  config: OpenClawConfig;
+  changes: string[];
+} {
+  const parsed = OpenClawSchema.safeParse(cfg);
+  if (parsed.success) {
+    return { config: cfg, changes: [] };
+  }
+
+  const next = structuredClone(cfg);
+  const changes: string[] = [];
+
+  for (const issue of parsed.error.issues) {
+    if (!isInvalidUnionLiteralIssue(issue)) {
+      continue;
+    }
+    const issuePath = issue.path;
+    if (issuePath.length === 0) {
+      continue;
+    }
+
+    // Walk the cloned config to the parent of the offending key.
+    let parent: unknown = next;
+    for (let i = 0; i < issuePath.length - 1; i++) {
+      if (!parent || typeof parent !== "object") {
+        parent = null;
+        break;
+      }
+      parent = (parent as Record<string, unknown>)[String(issuePath[i])];
+    }
+    if (!parent || typeof parent !== "object" || Array.isArray(parent)) {
+      continue;
+    }
+
+    const key = String(issuePath[issuePath.length - 1]);
+    const record = parent as Record<string, unknown>;
+    if (!(key in record)) {
+      continue;
+    }
+
+    const badValue = record[key];
+    const allowed = collectAllowedLiterals(issue);
+    delete record[key];
+    const pathLabel = issuePath.map(String).join(".");
+    const allowedLabel = allowed.length > 0 ? ` (allowed: ${allowed.join(", ")})` : "";
+    changes.push(
+      `- ${pathLabel}: removed invalid value "${String(badValue)}"${allowedLabel}; reset to default.`,
+    );
+  }
+
+  return { config: next, changes };
+}
+
 function maybeRepairDiscordNumericIds(cfg: OpenClawConfig): {
   config: OpenClawConfig;
   changes: string[];
@@ -1817,6 +1918,14 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
   }
 
   if (shouldRepair) {
+    const enumRepair = maybeRepairInvalidEnumValues(candidate);
+    if (enumRepair.changes.length > 0) {
+      note(enumRepair.changes.join("\n"), "Doctor changes");
+      candidate = enumRepair.config;
+      pendingChanges = true;
+      cfg = enumRepair.config;
+    }
+
     const repair = await maybeRepairTelegramAllowFromUsernames(candidate);
     if (repair.changes.length > 0) {
       note(repair.changes.join("\n"), "Doctor changes");
@@ -1873,6 +1982,17 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
       note(safeBinProfileRepair.warnings.join("\n"), "Doctor warnings");
     }
   } else {
+    const enumScan = maybeRepairInvalidEnumValues(candidate);
+    if (enumScan.changes.length > 0) {
+      note(
+        [
+          ...enumScan.changes,
+          `- Run "${formatCliCommand("openclaw doctor --fix")}" to reset invalid values to defaults.`,
+        ].join("\n"),
+        "Doctor warnings",
+      );
+    }
+
     const hits = scanTelegramAllowFromUsernameEntries(candidate);
     if (hits.length > 0) {
       note(
