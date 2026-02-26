@@ -66,12 +66,12 @@ describe("resolveTranscriptPolicy", () => {
     expect(policy.sanitizeMode).toBe("full");
   });
 
-  it("keeps OpenRouter on its existing turn-validation path", () => {
+  it("enables turn validation for OpenRouter (proxies strict-alternation models)", () => {
     const policy = resolveTranscriptPolicy({
       provider: "openrouter",
       modelId: "openai/gpt-4.1",
       modelApi: "openai-completions",
     });
-    expect(policy.validateAnthropicTurns).toBe(false);
+    expect(policy.validateAnthropicTurns).toBe(true);
   });
 });
