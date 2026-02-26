@@ -158,6 +158,7 @@ export const buildTelegramMessageContext = async ({
   resolveGroupActivation,
   resolveGroupRequireMention,
   resolveTelegramGroupConfig,
+  sendChatActionHandler,
 }: BuildTelegramMessageContextParams) => {
   const msg = primaryCtx.message;
   const chatId = msg.chat.id;
@@ -242,7 +243,6 @@ export const buildTelegramMessageContext = async ({
     baseRequireMention,
   );
 
-  const { sendChatActionHandler } = params;
   const sendTyping = async () => {
     await withTelegramApiErrorLogging({
       operation: "sendChatAction",
