@@ -349,6 +349,16 @@ export function createTelegramBot(opts: TelegramBotOptions) {
     return { groupConfig, topicConfig };
   };
 
+  // Global sendChatAction handler with 401 backoff / circuit breaker (issue #27092).
+  // Created BEFORE the message processor so it can be injected into every message context.
+  // Shared across all message contexts for this account so that consecutive 401s
+  // from ANY chat are tracked together — prevents infinite retry storms.
+  const sendChatActionHandler = createTelegramSendChatActionHandler({
+    sendChatActionFn: (chatId, action, threadParams) =>
+      bot.api.sendChatAction(chatId, action, threadParams),
+    logger: (message) => logVerbose(`telegram: ${message}`),
+  });
+
   const processMessage = createTelegramMessageProcessor({
     bot,
     cfg,
@@ -364,6 +374,7 @@ export function createTelegramBot(opts: TelegramBotOptions) {
     resolveGroupActivation,
     resolveGroupRequireMention,
     resolveTelegramGroupConfig,
+    sendChatActionHandler,
     runtime,
     replyToMode,
     streamMode,
@@ -408,16 +419,7 @@ export function createTelegramBot(opts: TelegramBotOptions) {
     logger,
   });
 
-  // Global sendChatAction handler with 401 backoff / circuit breaker (issue #27092).
-  // Shared across all message contexts for this account so that consecutive 401s
-  // from ANY chat are tracked together — prevents infinite retry storms.
-  const sendChatActionHandler = createTelegramSendChatActionHandler({
-    sendChatActionFn: (chatId, action, threadParams) =>
-      bot.api.sendChatAction(chatId, action, threadParams),
-    logger: (message) => logVerbose(`telegram: ${message}`),
-  });
-
-  return Object.assign(bot, { sendChatActionHandler });
+  return bot;
 }
 
 export function createTelegramWebhookCallback(bot: Bot, path = "/telegram-webhook") {

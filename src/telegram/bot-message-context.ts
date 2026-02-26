@@ -116,8 +116,8 @@ export type BuildTelegramMessageContextParams = {
   resolveGroupActivation: ResolveGroupActivation;
   resolveGroupRequireMention: ResolveGroupRequireMention;
   resolveTelegramGroupConfig: ResolveTelegramGroupConfig;
-  /** Global (per-account) handler for sendChatAction 401 backoff. */
-  sendChatActionHandler?: import("./sendchataction-401-backoff.js").TelegramSendChatActionHandler;
+  /** Global (per-account) handler for sendChatAction 401 backoff (#27092). */
+  sendChatActionHandler: import("./sendchataction-401-backoff.js").TelegramSendChatActionHandler;
 };
 
 async function resolveStickerVisionSupport(params: {
@@ -247,13 +247,11 @@ export const buildTelegramMessageContext = async ({
     await withTelegramApiErrorLogging({
       operation: "sendChatAction",
       fn: () =>
-        sendChatActionHandler
-          ? sendChatActionHandler.sendChatAction(
-              chatId,
-              "typing",
-              buildTypingThreadParams(replyThreadId),
-            )
-          : bot.api.sendChatAction(chatId, "typing", buildTypingThreadParams(replyThreadId)),
+        sendChatActionHandler.sendChatAction(
+          chatId,
+          "typing",
+          buildTypingThreadParams(replyThreadId),
+        ),
     });
   };
 
@@ -262,17 +260,11 @@ export const buildTelegramMessageContext = async ({
       await withTelegramApiErrorLogging({
         operation: "sendChatAction",
         fn: () =>
-          sendChatActionHandler
-            ? sendChatActionHandler.sendChatAction(
-                chatId,
-                "record_voice",
-                buildTypingThreadParams(replyThreadId),
-              )
-            : bot.api.sendChatAction(
-                chatId,
-                "record_voice",
-                buildTypingThreadParams(replyThreadId),
-              ),
+          sendChatActionHandler.sendChatAction(
+            chatId,
+            "record_voice",
+            buildTypingThreadParams(replyThreadId),
+          ),
       });
     } catch (err) {
       logVerbose(`telegram record_voice cue failed for chat ${chatId}: ${String(err)}`);
