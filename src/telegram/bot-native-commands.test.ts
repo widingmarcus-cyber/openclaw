@@ -273,4 +273,52 @@ describe("registerTelegramNativeCommands", () => {
     );
     expect(sendMessage).not.toHaveBeenCalledWith(123, "Command not found.");
   });
+
+  it("processes channel_post commands instead of silently dropping them", async () => {
+    const commandHandlers = new Map<string, (ctx: unknown) => Promise<void>>();
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const cfg: OpenClawConfig = {};
+
+    pluginCommandMocks.getPluginCommandSpecs.mockReturnValue([
+      { name: "plug", description: "Plugin command" },
+    ] as never);
+    pluginCommandMocks.matchPluginCommand.mockReturnValue({
+      command: { key: "plug", requireAuth: false },
+      args: undefined,
+    } as never);
+    pluginCommandMocks.executePluginCommand.mockResolvedValue({
+      text: "channel reply",
+    } as never);
+
+    registerTelegramNativeCommands({
+      ...buildParams(cfg),
+      bot: {
+        api: {
+          setMyCommands: vi.fn().mockResolvedValue(undefined),
+          sendMessage,
+        },
+        command: vi.fn((name: string, cb: (ctx: unknown) => Promise<void>) => {
+          commandHandlers.set(name, cb);
+        }),
+      } as unknown as Parameters<typeof registerTelegramNativeCommands>[0]["bot"],
+    });
+
+    const handler = commandHandlers.get("plug");
+    expect(handler).toBeTruthy();
+
+    // Simulate a channel_post: ctx.message is undefined, ctx.channelPost is set
+    await handler?.({
+      match: "",
+      message: undefined,
+      channelPost: {
+        message_id: 99,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: -1001234, type: "channel" },
+        sender_chat: { id: -1001234, type: "channel" },
+      },
+    });
+
+    // The handler should NOT silently bail — it should reach the plugin executor
+    expect(pluginCommandMocks.matchPluginCommand).toHaveBeenCalled();
+  });
 });
