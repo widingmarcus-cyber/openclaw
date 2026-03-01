@@ -6,6 +6,7 @@
  * co-locates the dual dispatch so each call site only needs one function.
  */
 
+import { logVerbose } from "../globals.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { createInternalHookEvent, triggerInternalHook } from "./internal-hooks.js";
 
@@ -42,7 +43,9 @@ export function emitMessageReceived(params: {
           conversationId: params.conversationId,
         },
       )
-      .catch(() => {});
+      .catch((err) => {
+        logVerbose(`dispatch-unified: message_received plugin hook failed: ${String(err)}`);
+      });
   }
 
   if (params.sessionKey) {
@@ -91,7 +94,9 @@ export function emitMessageSent(params: {
           conversationId: params.conversationId ?? params.to,
         },
       )
-      .catch(() => {});
+      .catch((err) => {
+        logVerbose(`dispatch-unified: message_sent plugin hook failed: ${String(err)}`);
+      });
   }
 
   if (params.sessionKey) {
@@ -126,7 +131,11 @@ export function emitGatewayStartup(params: {
   // Plugin hook
   const hookRunner = getGlobalHookRunner();
   if (hookRunner?.hasHooks("gateway_start")) {
-    void hookRunner.runGatewayStart({ port: params.port }, { port: params.port }).catch(() => {});
+    void hookRunner
+      .runGatewayStart({ port: params.port }, { port: params.port })
+      .catch((err) => {
+        logVerbose(`dispatch-unified: gateway_start plugin hook failed: ${String(err)}`);
+      });
   }
 
   // Internal hook — no setTimeout, fire immediately after hooks are loaded

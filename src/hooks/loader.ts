@@ -25,7 +25,7 @@ function resolveHookSource(source: string): HookSource {
     case "openclaw-bundled": return "bundled";
     case "openclaw-managed": return "managed";
     case "openclaw-workspace": return "workspace";
-    case "openclaw-plugin": return "plugin";
+    case "openclaw-plugin": return "workspace";
     default: return "config";
   }
 }
