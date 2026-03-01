@@ -151,6 +151,19 @@ export function isTimeoutError(err: unknown): boolean {
   return hasTimeoutHint(cause) || hasTimeoutHint(reason);
 }
 
+/**
+ * Detect rate-limit semantics in a 402 response.
+ * Anthropic Max plan returns HTTP 402 when hitting plan rate limits,
+ * but the error body contains rate-limit language (e.g. "rate limit",
+ * "too many requests", "usage limit", "try again") rather than billing
+ * language ("insufficient", "credits", "balance").
+ */
+const RATE_LIMIT_402_RE =
+  /rate.limit|too many requests|usage.limit|try again|retry.after|throttl|capacity|overloaded/i;
+
+function isRateLimitLike402(msg: string): boolean {
+  return RATE_LIMIT_402_RE.test(msg);
+}
 export function resolveFailoverReasonFromError(err: unknown): FailoverReason | null {
   if (isFailoverError(err)) {
     return err.reason;
@@ -158,6 +171,12 @@ export function resolveFailoverReasonFromError(err: unknown): FailoverReason | n
 
   const status = getStatusCode(err);
   if (status === 402) {
+    // Anthropic Max plan returns 402 for rate limits (not just billing).
+    // Check the error message for rate-limit indicators before classifying.
+    const msg402 = getErrorMessage(err);
+    if (msg402 && isRateLimitLike402(msg402)) {
+      return "rate_limit";
+    }
     return "billing";
   }
   if (status === 429) {

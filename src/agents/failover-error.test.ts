@@ -10,6 +10,26 @@ import {
 describe("failover-error", () => {
   it("infers failover reason from HTTP status", () => {
     expect(resolveFailoverReasonFromError({ status: 402 })).toBe("billing");
+    // Anthropic Max plan returns 402 with rate-limit language — treat as rate_limit, not billing (#30484)
+    expect(
+      resolveFailoverReasonFromError({
+        status: 402,
+        message: "rate limit exceeded, try again later",
+      }),
+    ).toBe("rate_limit");
+    expect(resolveFailoverReasonFromError({ status: 402, message: "too many requests" })).toBe(
+      "rate_limit",
+    );
+    expect(
+      resolveFailoverReasonFromError({
+        status: 402,
+        message: "usage limit reached, retry after 30s",
+      }),
+    ).toBe("rate_limit");
+    // Plain 402 without rate-limit language stays as billing
+    expect(resolveFailoverReasonFromError({ status: 402, message: "insufficient credits" })).toBe(
+      "billing",
+    );
     expect(resolveFailoverReasonFromError({ statusCode: "429" })).toBe("rate_limit");
     expect(resolveFailoverReasonFromError({ status: 403 })).toBe("auth");
     expect(resolveFailoverReasonFromError({ status: 408 })).toBe("timeout");
