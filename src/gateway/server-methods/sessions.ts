@@ -368,41 +368,44 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const hookRunner = getGlobalHookRunner();
     if (hookRunner?.hasHooks("before_reset")) {
       const sessionFile = entry?.sessionFile;
-      void (async () => {
+      // Read session file synchronously BEFORE cleanup can rename/archive it
+      const messages: unknown[] = [];
+      if (sessionFile) {
         try {
-          const messages: unknown[] = [];
-          if (sessionFile) {
-            const content = fs.readFileSync(sessionFile, "utf-8");
-            for (const line of content.split("\n")) {
-              if (!line.trim()) {
-                continue;
+          const fileContent = fs.readFileSync(sessionFile, "utf-8");
+          for (const line of fileContent.split("\n")) {
+            if (!line.trim()) {
+              continue;
+            }
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.type === "message" && parsed.message) {
+                messages.push(parsed.message);
               }
-              try {
-                const parsed = JSON.parse(line);
-                if (parsed.type === "message" && parsed.message) {
-                  messages.push(parsed.message);
-                }
-              } catch {
-                // skip malformed lines
-              }
+            } catch {
+              // skip malformed lines
             }
           }
-          await hookRunner.runBeforeReset(
-            { sessionFile, messages, reason: commandReason },
-            {
-              agentId: (() => {
-                const k = target.canonicalKey ?? key;
-                const parts = k.split(":");
-                return parts[0] === "agent" && parts[1] ? parts[1] : (parts[0] ?? "main");
-              })(),
-              sessionKey: target.canonicalKey ?? key,
-              sessionId: entry?.sessionId,
-            },
-          );
         } catch {
-          // Don't block session reset on hook failure
+          // file may not exist
         }
+      }
+      const resetAgentId = (() => {
+        const k = target.canonicalKey ?? key;
+        const parts = k.split(":");
+        return parts[0] === "agent" && parts[1] ? parts[1] : (parts[0] ?? "main");
       })();
+      // Fire hook async — file content is already captured above
+      void hookRunner
+        .runBeforeReset(
+          { sessionFile, messages, reason: commandReason },
+          {
+            agentId: resetAgentId,
+            sessionKey: target.canonicalKey ?? key,
+            sessionId: entry?.sessionId,
+          },
+        )
+        .catch(() => {});
     }
 
     const sessionId = entry?.sessionId;
