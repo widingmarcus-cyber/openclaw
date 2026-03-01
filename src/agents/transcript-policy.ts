@@ -38,8 +38,6 @@ const OPENAI_MODEL_APIS = new Set([
   "openai-codex-responses",
 ]);
 const OPENAI_PROVIDERS = new Set(["openai", "openai-codex"]);
-// Previously used to exclude certain providers from turn validation; no longer needed
-// since all non-OpenAI providers now get validation (#27862).
 
 function isOpenAiApi(modelApi?: string | null): boolean {
   if (!modelApi) {
@@ -86,8 +84,6 @@ export function resolveTranscriptPolicy(params: {
   const isGoogle = isGoogleModelApi(params.modelApi);
   const isAnthropic = isAnthropicApi(params.modelApi, provider);
   const isOpenAi = isOpenAiProvider(provider) || (!provider && isOpenAiApi(params.modelApi));
-  // isStrictOpenAiCompatible was previously used to gate turn validation for a subset
-  // of openai-completions providers. Now all non-OpenAI providers get validation (#27862).
   const isMistral = isMistralModel({ provider, modelId });
   const isOpenRouterGemini =
     (provider === "openrouter" || provider === "opencode" || provider === "kilocode") &&
