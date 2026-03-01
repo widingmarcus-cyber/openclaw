@@ -110,8 +110,26 @@ export interface InternalHookEvent {
 
 export type InternalHookHandler = (event: InternalHookEvent) => Promise<void> | void;
 
-/** Registry of hook handlers by event key */
-const handlers = new Map<string, InternalHookHandler[]>();
+export type HookSource = "bundled" | "workspace" | "managed" | "config" | "plugin";
+
+interface HookRegistryEntry {
+  handler: InternalHookHandler;
+  source: HookSource;
+}
+
+const HOOK_REGISTRY_KEY = Symbol.for("openclaw:hookRegistry");
+
+type HookRegistryState = {
+  handlers: Map<string, HookRegistryEntry[]>;
+};
+
+const registryState: HookRegistryState = (() => {
+  const g = globalThis as typeof globalThis & { [HOOK_REGISTRY_KEY]?: HookRegistryState };
+  if (!g[HOOK_REGISTRY_KEY]) {
+    g[HOOK_REGISTRY_KEY] = { handlers: new Map() };
+  }
+  return g[HOOK_REGISTRY_KEY];
+})();
 const log = createSubsystemLogger("internal-hooks");
 
 /**
@@ -133,11 +151,15 @@ const log = createSubsystemLogger("internal-hooks");
  * });
  * ```
  */
-export function registerInternalHook(eventKey: string, handler: InternalHookHandler): void {
-  if (!handlers.has(eventKey)) {
-    handlers.set(eventKey, []);
+export function registerInternalHook(
+  eventKey: string,
+  handler: InternalHookHandler,
+  source: HookSource = "config",
+): void {
+  if (!registryState.handlers.has(eventKey)) {
+    registryState.handlers.set(eventKey, []);
   }
-  handlers.get(eventKey)!.push(handler);
+  registryState.handlers.get(eventKey)!.push({ handler, source });
 }
 
 /**
@@ -147,19 +169,19 @@ export function registerInternalHook(eventKey: string, handler: InternalHookHand
  * @param handler - The handler function to remove
  */
 export function unregisterInternalHook(eventKey: string, handler: InternalHookHandler): void {
-  const eventHandlers = handlers.get(eventKey);
-  if (!eventHandlers) {
+  const eventEntries = registryState.handlers.get(eventKey);
+  if (!eventEntries) {
     return;
   }
 
-  const index = eventHandlers.indexOf(handler);
+  const index = eventEntries.findIndex((e) => e.handler === handler);
   if (index !== -1) {
-    eventHandlers.splice(index, 1);
+    eventEntries.splice(index, 1);
   }
 
-  // Clean up empty handler arrays
-  if (eventHandlers.length === 0) {
-    handlers.delete(eventKey);
+  // Clean up empty entry arrays
+  if (eventEntries.length === 0) {
+    registryState.handlers.delete(eventKey);
   }
 }
 
@@ -167,14 +189,30 @@ export function unregisterInternalHook(eventKey: string, handler: InternalHookHa
  * Clear all registered hooks (useful for testing)
  */
 export function clearInternalHooks(): void {
-  handlers.clear();
+  registryState.handlers.clear();
+}
+
+/**
+ * Clear hooks registered by specific sources, preserving hooks from other sources.
+ * Use this instead of clearInternalHooks() during hot-reload to preserve plugin hooks.
+ */
+export function clearInternalHooksBySource(sources: HookSource[]): void {
+  const sourceSet = new Set(sources);
+  for (const [key, entries] of registryState.handlers) {
+    const filtered = entries.filter((e) => !sourceSet.has(e.source));
+    if (filtered.length === 0) {
+      registryState.handlers.delete(key);
+    } else {
+      registryState.handlers.set(key, filtered);
+    }
+  }
 }
 
 /**
  * Get all registered event keys (useful for debugging)
  */
 export function getRegisteredEventKeys(): string[] {
-  return Array.from(handlers.keys());
+  return Array.from(registryState.handlers.keys());
 }
 
 /**
@@ -190,18 +228,18 @@ export function getRegisteredEventKeys(): string[] {
  * @param event - The event to trigger
  */
 export async function triggerInternalHook(event: InternalHookEvent): Promise<void> {
-  const typeHandlers = handlers.get(event.type) ?? [];
-  const specificHandlers = handlers.get(`${event.type}:${event.action}`) ?? [];
+  const typeEntries = registryState.handlers.get(event.type) ?? [];
+  const specificEntries = registryState.handlers.get(`${event.type}:${event.action}`) ?? [];
 
-  const allHandlers = [...typeHandlers, ...specificHandlers];
+  const allEntries = [...typeEntries, ...specificEntries];
 
-  if (allHandlers.length === 0) {
+  if (allEntries.length === 0) {
     return;
   }
 
-  for (const handler of allHandlers) {
+  for (const entry of allEntries) {
     try {
-      await handler(event);
+      await entry.handler(event);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error(`Hook error [${event.type}:${event.action}]: ${message}`);

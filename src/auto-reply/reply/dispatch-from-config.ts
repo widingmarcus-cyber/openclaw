@@ -2,14 +2,13 @@ import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { loadSessionStore, resolveStorePath } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
-import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
+import { emitMessageReceived } from "../../hooks/dispatch-unified.js";
 import { isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import {
   logMessageProcessed,
   logMessageQueued,
   logSessionStateChange,
 } from "../../logging/diagnostic.js";
-import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { maybeApplyTtsToPayload, normalizeTtsAutoMode, resolveTtsConfig } from "../../tts/tts.js";
 import { getReplyFromConfig } from "../reply.js";
 import type { FinalizedMsgContext } from "../templating.js";
@@ -149,9 +148,8 @@ export async function dispatchReplyFromConfig(params: {
 
   const inboundAudio = isInboundAudioContext(ctx);
   const sessionTtsAuto = resolveSessionTtsAuto(ctx, cfg);
-  const hookRunner = getGlobalHookRunner();
 
-  // Extract message context for hooks (plugin and internal)
+  // Extract message context for hooks
   const timestamp =
     typeof ctx.Timestamp === "number" && Number.isFinite(ctx.Timestamp) ? ctx.Timestamp : undefined;
   const messageIdForHook =
@@ -167,69 +165,31 @@ export async function dispatchReplyFromConfig(params: {
   const channelId = (ctx.OriginatingChannel ?? ctx.Surface ?? ctx.Provider ?? "").toLowerCase();
   const conversationId = ctx.OriginatingTo ?? ctx.To ?? ctx.From ?? undefined;
 
-  // Trigger plugin hooks (fire-and-forget)
-  if (hookRunner?.hasHooks("message_received")) {
-    void hookRunner
-      .runMessageReceived(
-        {
-          from: ctx.From ?? "",
-          content,
-          timestamp,
-          metadata: {
-            to: ctx.To,
-            provider: ctx.Provider,
-            surface: ctx.Surface,
-            threadId: ctx.MessageThreadId,
-            originatingChannel: ctx.OriginatingChannel,
-            originatingTo: ctx.OriginatingTo,
-            messageId: messageIdForHook,
-            senderId: ctx.SenderId,
-            senderName: ctx.SenderName,
-            senderUsername: ctx.SenderUsername,
-            senderE164: ctx.SenderE164,
-            guildId: ctx.GroupSpace,
-            channelName: ctx.GroupChannel,
-          },
-        },
-        {
-          channelId,
-          accountId: ctx.AccountId,
-          conversationId,
-        },
-      )
-      .catch((err) => {
-        logVerbose(`dispatch-from-config: message_received plugin hook failed: ${String(err)}`);
-      });
-  }
-
-  // Bridge to internal hooks (HOOK.md discovery system) - refs #8807
-  if (sessionKey) {
-    void triggerInternalHook(
-      createInternalHookEvent("message", "received", sessionKey, {
-        from: ctx.From ?? "",
-        content,
-        timestamp,
-        channelId,
-        accountId: ctx.AccountId,
-        conversationId,
-        messageId: messageIdForHook,
-        metadata: {
-          to: ctx.To,
-          provider: ctx.Provider,
-          surface: ctx.Surface,
-          threadId: ctx.MessageThreadId,
-          senderId: ctx.SenderId,
-          senderName: ctx.SenderName,
-          senderUsername: ctx.SenderUsername,
-          senderE164: ctx.SenderE164,
-          guildId: ctx.GroupSpace,
-          channelName: ctx.GroupChannel,
-        },
-      }),
-    ).catch((err) => {
-      logVerbose(`dispatch-from-config: message_received internal hook failed: ${String(err)}`);
-    });
-  }
+  // Unified dispatch: fires both plugin and internal hooks (#30784)
+  emitMessageReceived({
+    from: ctx.From ?? "",
+    content,
+    timestamp,
+    channelId,
+    accountId: ctx.AccountId,
+    conversationId,
+    messageId: messageIdForHook,
+    sessionKey,
+    metadata: {
+      to: ctx.To,
+      provider: ctx.Provider,
+      surface: ctx.Surface,
+      threadId: ctx.MessageThreadId,
+      originatingChannel: ctx.OriginatingChannel,
+      originatingTo: ctx.OriginatingTo,
+      senderId: ctx.SenderId,
+      senderName: ctx.SenderName,
+      senderUsername: ctx.SenderUsername,
+      senderE164: ctx.SenderE164,
+      guildId: ctx.GroupSpace,
+      channelName: ctx.GroupChannel,
+    },
+  });
 
   // Check if we should route replies to originating channel instead of dispatcher.
   // Only route when the originating channel is DIFFERENT from the current surface.

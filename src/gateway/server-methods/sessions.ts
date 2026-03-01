@@ -363,6 +363,42 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       },
     );
     await triggerInternalHook(hookEvent);
+
+    // Fire before_reset plugin hook — extract memories before session history is lost (#30784)
+    const hookRunner = getGlobalHookRunner();
+    if (hookRunner?.hasHooks("before_reset")) {
+      const sessionFile = entry?.sessionFile;
+      void (async () => {
+        try {
+          const messages: unknown[] = [];
+          if (sessionFile) {
+            const content = fs.readFileSync(sessionFile, "utf-8");
+            for (const line of content.split("\n")) {
+              if (!line.trim()) continue;
+              try {
+                const parsed = JSON.parse(line);
+                if (parsed.type === "message" && parsed.message) {
+                  messages.push(parsed.message);
+                }
+              } catch {
+                // skip malformed lines
+              }
+            }
+          }
+          await hookRunner.runBeforeReset(
+            { sessionFile, messages, reason: commandReason },
+            {
+              agentId: (target.canonicalKey ?? key).split(":")[0] ?? "main",
+              sessionKey: target.canonicalKey ?? key,
+              sessionId: entry?.sessionId,
+            },
+          );
+        } catch {
+          // Don't block session reset on hook failure
+        }
+      })();
+    }
+
     const sessionId = entry?.sessionId;
     const cleanupError = await ensureSessionRuntimeCleanup({ cfg, key, target, sessionId });
     if (cleanupError) {

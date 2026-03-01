@@ -262,7 +262,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     }
 
     for (const event of normalizedEvents) {
-      registerInternalHook(event, handler);
+      registerInternalHook(event, handler, "plugin");
     }
   };
 

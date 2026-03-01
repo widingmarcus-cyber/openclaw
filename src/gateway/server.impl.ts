@@ -40,7 +40,8 @@ import {
 import { scheduleGatewayUpdateCheck } from "../infra/update-startup.js";
 import { startDiagnosticHeartbeat, stopDiagnosticHeartbeat } from "../logging/diagnostic.js";
 import { createSubsystemLogger, runtimeForLogger } from "../logging/subsystem.js";
-import { getGlobalHookRunner, runGlobalGatewayStopSafely } from "../plugins/hook-runner-global.js";
+import { runGlobalGatewayStopSafely } from "../plugins/hook-runner-global.js";
+import { emitGatewayStartup } from "../hooks/dispatch-unified.js";
 import { createEmptyPluginRegistry } from "../plugins/registry.js";
 import type { PluginServicesHandle } from "../plugins/services.js";
 import { getTotalQueueSize } from "../process/command-queue.js";
@@ -681,14 +682,15 @@ export async function startGatewayServer(
     }));
   }
 
-  // Run gateway_start plugin hook (fire-and-forget)
+  // Emit gateway startup through both plugin and internal hook systems (#30784)
   if (!minimalTestGateway) {
-    const hookRunner = getGlobalHookRunner();
-    if (hookRunner?.hasHooks("gateway_start")) {
-      void hookRunner.runGatewayStart({ port }, { port }).catch((err) => {
-        log.warn(`gateway_start hook failed: ${String(err)}`);
-      });
-    }
+    emitGatewayStartup({
+      port,
+      cfg: cfgAtStart,
+      deps,
+      workspaceDir: defaultWorkspaceDir,
+      internalHooksEnabled: cfgAtStart.hooks?.internal?.enabled === true,
+    });
   }
 
   const configReloader = minimalTestGateway

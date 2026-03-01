@@ -12,12 +12,23 @@ import { isPathInsideWithRealpath } from "../security/scan-paths.js";
 import { resolveHookConfig } from "./config.js";
 import { shouldIncludeHook } from "./config.js";
 import { buildImportUrl } from "./import-url.js";
-import type { InternalHookHandler } from "./internal-hooks.js";
+import type { InternalHookHandler, HookSource } from "./internal-hooks.js";
 import { registerInternalHook } from "./internal-hooks.js";
 import { resolveFunctionModuleExport } from "./module-loader.js";
 import { loadWorkspaceHookEntries } from "./workspace.js";
 
 const log = createSubsystemLogger("hooks:loader");
+
+/** Map workspace discovery source names to HookSource for source-scoped clearing. */
+function resolveHookSource(source: string): HookSource {
+  switch (source) {
+    case "openclaw-bundled": return "bundled";
+    case "openclaw-managed": return "managed";
+    case "openclaw-workspace": return "workspace";
+    case "openclaw-plugin": return "plugin";
+    default: return "config";
+  }
+}
 
 /**
  * Load and register all hook handlers
@@ -106,8 +117,9 @@ export async function loadInternalHooks(
           continue;
         }
 
+        const source = resolveHookSource(entry.hook.source);
         for (const event of events) {
-          registerInternalHook(event, handler);
+          registerInternalHook(event, handler, source);
         }
 
         log.info(
@@ -176,7 +188,7 @@ export async function loadInternalHooks(
         continue;
       }
 
-      registerInternalHook(handlerConfig.event, handler);
+      registerInternalHook(handlerConfig.event, handler, "config");
       log.info(
         `Registered hook (legacy): ${handlerConfig.event} -> ${modulePath}${exportName !== "default" ? `#${exportName}` : ""}`,
       );

@@ -12,9 +12,7 @@ import type { loadConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
 import { startGmailWatcherWithLogs } from "../hooks/gmail-watcher-lifecycle.js";
 import {
-  clearInternalHooks,
-  createInternalHookEvent,
-  triggerInternalHook,
+  clearInternalHooksBySource,
 } from "../hooks/internal-hooks.js";
 import { loadInternalHooks } from "../hooks/loader.js";
 import { isTruthyEnvValue } from "../infra/env.js";
@@ -108,8 +106,8 @@ export async function startGatewaySidecars(params: {
 
   // Load internal hook handlers from configuration and directory discovery.
   try {
-    // Clear any previously registered hooks to ensure fresh loading
-    clearInternalHooks();
+    // Clear file-discovered hooks but preserve plugin-registered hooks (#30784)
+    clearInternalHooksBySource(["bundled", "workspace", "managed", "config"]);
     const loadedCount = await loadInternalHooks(params.cfg, params.defaultWorkspaceDir);
     if (loadedCount > 0) {
       params.logHooks.info(
@@ -137,16 +135,8 @@ export async function startGatewaySidecars(params: {
     );
   }
 
-  if (params.cfg.hooks?.internal?.enabled) {
-    setTimeout(() => {
-      const hookEvent = createInternalHookEvent("gateway", "startup", "gateway:startup", {
-        cfg: params.cfg,
-        deps: params.deps,
-        workspaceDir: params.defaultWorkspaceDir,
-      });
-      void triggerInternalHook(hookEvent);
-    }, 250);
-  }
+  // gateway:startup hook is now emitted from server.impl.ts via
+  // emitGatewayStartup() after sidecars are fully loaded (#30784)
 
   let pluginServices: PluginServicesHandle | null = null;
   try {

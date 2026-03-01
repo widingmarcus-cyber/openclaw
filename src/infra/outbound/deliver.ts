@@ -18,7 +18,7 @@ import {
   resolveMirroredTranscriptText,
 } from "../../config/sessions.js";
 import type { sendMessageDiscord } from "../../discord/send.js";
-import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
+import { emitMessageSent as emitMessageSentHook } from "../../hooks/dispatch-unified.js";
 import type { sendMessageIMessage } from "../../imessage/send.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
@@ -453,44 +453,24 @@ async function deliverOutboundPayloadsCore(
       mediaUrls: payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []),
       channelData: payload.channelData,
     };
-    const emitMessageSent = (params: {
+    // Unified dispatch: fires both plugin and internal hooks (#30784)
+    const emitMessageSent = (p: {
       success: boolean;
       content: string;
       error?: string;
       messageId?: string;
     }) => {
-      if (hookRunner?.hasHooks("message_sent")) {
-        void hookRunner
-          .runMessageSent(
-            {
-              to,
-              content: params.content,
-              success: params.success,
-              ...(params.error ? { error: params.error } : {}),
-            },
-            {
-              channelId: channel,
-              accountId: accountId ?? undefined,
-              conversationId: to,
-            },
-          )
-          .catch(() => {});
-      }
-      if (!sessionKeyForInternalHooks) {
-        return;
-      }
-      void triggerInternalHook(
-        createInternalHookEvent("message", "sent", sessionKeyForInternalHooks, {
-          to,
-          content: params.content,
-          success: params.success,
-          ...(params.error ? { error: params.error } : {}),
-          channelId: channel,
-          accountId: accountId ?? undefined,
-          conversationId: to,
-          messageId: params.messageId,
-        }),
-      ).catch(() => {});
+      emitMessageSentHook({
+        to,
+        content: p.content,
+        success: p.success,
+        error: p.error,
+        channelId: channel,
+        accountId: accountId ?? undefined,
+        conversationId: to,
+        messageId: p.messageId,
+        sessionKey: sessionKeyForInternalHooks,
+      });
     };
     try {
       throwIfAborted(abortSignal);
