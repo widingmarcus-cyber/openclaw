@@ -46,7 +46,7 @@ import { createFollowupRunner } from "./followup-runner.js";
 import { resolveOriginMessageProvider, resolveOriginMessageTo } from "./origin-routing.js";
 import { readPostCompactionContext } from "./post-compaction-context.js";
 import { resolveActiveRunQueueAction } from "./queue-policy.js";
-import { enqueueFollowupRun, type FollowupRun, type QueueSettings } from "./queue.js";
+import { enqueueFollowupRun, scheduleFollowupDrain, type FollowupRun, type QueueSettings } from "./queue.js";
 import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
 import { createTypingSignaler } from "./typing-mode.js";
@@ -725,5 +725,12 @@ export async function runReplyAgent(params: {
     // Calling this twice is harmless — cleanup() is guarded by the
     // `active` flag.  Same pattern as the followup runner fix (#26881).
     typing.markDispatchIdle();
+    // Safety net: drain followup queue even when the run throws an unhandled
+    // error.  All normal code paths call finalizeWithFollowup() before
+    // returning, but if runAgentTurnWithFallback() throws (e.g. timeout
+    // kill, SDK error), queued user messages would otherwise be stuck
+    // forever.  scheduleFollowupDrain is idempotent — calling it twice
+    // (once in the normal path, once here) is harmless.
+    scheduleFollowupDrain(queueKey, runFollowupTurn);
   }
 }
