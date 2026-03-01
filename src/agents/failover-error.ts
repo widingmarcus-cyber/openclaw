@@ -155,11 +155,16 @@ export function isTimeoutError(err: unknown): boolean {
  * Detect rate-limit semantics in a 402 response.
  * Anthropic Max plan returns HTTP 402 when hitting plan rate limits,
  * but the error body contains rate-limit language (e.g. "rate limit",
- * "too many requests", "usage limit", "try again") rather than billing
- * language ("insufficient", "credits", "balance").
+ * "too many requests", "usage limit") rather than billing language
+ * ("insufficient", "credits", "balance").
+ *
+ * NOTE: bare "try again" was intentionally excluded because it can appear
+ * in billing errors such as "insufficient credits, try again after adding
+ * funds".  The remaining patterns are sufficient for known rate-limit
+ * responses.
  */
 const RATE_LIMIT_402_RE =
-  /rate.limit|too many requests|usage.limit|try again|retry.after|throttl|capacity|overloaded/i;
+  /rate.limit|too many requests|usage.limit|retry.after|throttl|capacity|overloaded/i;
 
 function isRateLimitLike402(msg: string): boolean {
   return RATE_LIMIT_402_RE.test(msg);

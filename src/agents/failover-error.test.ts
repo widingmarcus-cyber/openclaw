@@ -30,6 +30,13 @@ describe("failover-error", () => {
     expect(resolveFailoverReasonFromError({ status: 402, message: "insufficient credits" })).toBe(
       "billing",
     );
+    // "try again" in billing context must NOT be misclassified as rate_limit (#30687)
+    expect(
+      resolveFailoverReasonFromError({
+        status: 402,
+        message: "insufficient credits, try again after adding funds",
+      }),
+    ).toBe("billing");
     expect(resolveFailoverReasonFromError({ statusCode: "429" })).toBe("rate_limit");
     expect(resolveFailoverReasonFromError({ status: 403 })).toBe("auth");
     expect(resolveFailoverReasonFromError({ status: 408 })).toBe("timeout");
