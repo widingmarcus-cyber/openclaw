@@ -651,7 +651,7 @@ function scanDiscordNumericIdEntries(cfg: OpenClawConfig): DiscordNumericIdHit[]
 // Invalid enum / literal union repair (#26836)
 // ---------------------------------------------------------------------------
 
-// Note: Zod v3 exposes nested union errors via `.errors` (array of arrays).
+// Note: Zod v4 exposes nested union errors via `.errors` (array of arrays).
 // The runtime guard in isInvalidUnionLiteralIssue validates this structure defensively.
 type InvalidUnionIssue = ZodIssue & {
   code: "invalid_union";
