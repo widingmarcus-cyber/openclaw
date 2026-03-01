@@ -63,7 +63,7 @@ describe("normalizeUsage", () => {
       cached_tokens: 19,
     });
     expect(usage).toEqual({
-      input: 30,
+      input: 11, // 30 - 19: prompt_tokens includes cached_tokens
       output: 9,
       cacheRead: 19,
       cacheWrite: undefined,
@@ -80,7 +80,7 @@ describe("normalizeUsage", () => {
       prompt_tokens_details: { cached_tokens: 1024 },
     });
     expect(usage).toEqual({
-      input: 1113,
+      input: 89, // 1113 - 1024: prompt_tokens includes cached_tokens
       output: 5,
       cacheRead: 1024,
       cacheWrite: undefined,
@@ -174,5 +174,83 @@ describe("deriveSessionTotalTokens", () => {
       promptTokens: 2500, // Override
     });
     expect(totalTokens).toBe(2500);
+  });
+});
+
+describe("normalizeUsage — OpenAI cache double-count fix", () => {
+  it("subtracts cached_tokens from prompt_tokens to avoid double-counting", () => {
+    const result = normalizeUsage({
+      prompt_tokens: 1000,
+      completion_tokens: 200,
+      prompt_tokens_details: { cached_tokens: 800 },
+    });
+    expect(result).toEqual({
+      input: 200, // 1000 - 800 (non-cached portion)
+      output: 200,
+      cacheRead: 800,
+      cacheWrite: undefined,
+      total: undefined,
+    });
+  });
+
+  it("subtracts cached_tokens (top-level) from prompt_tokens", () => {
+    const result = normalizeUsage({
+      prompt_tokens: 500,
+      completion_tokens: 100,
+      cached_tokens: 300,
+    });
+    expect(result).toEqual({
+      input: 200,
+      output: 100,
+      cacheRead: 300,
+      cacheWrite: undefined,
+      total: undefined,
+    });
+  });
+
+  it("does NOT subtract when Anthropic-style input_tokens is present", () => {
+    // Anthropic reports input_tokens as non-cached, so no subtraction needed.
+    const result = normalizeUsage({
+      input_tokens: 200,
+      output_tokens: 100,
+      cache_read_input_tokens: 800,
+    });
+    expect(result).toEqual({
+      input: 200,
+      output: 100,
+      cacheRead: 800,
+      cacheWrite: undefined,
+      total: undefined,
+    });
+  });
+
+  it("clamps to zero when cached_tokens exceeds prompt_tokens", () => {
+    const result = normalizeUsage({
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      prompt_tokens_details: { cached_tokens: 150 },
+    });
+    expect(result).toEqual({
+      input: 0,
+      output: 50,
+      cacheRead: 150,
+      cacheWrite: undefined,
+      total: undefined,
+    });
+  });
+
+  it("no adjustment when cacheRead is zero", () => {
+    const result = normalizeUsage({
+      prompt_tokens: 500,
+      completion_tokens: 100,
+      prompt_tokens_details: { cached_tokens: 0 },
+    });
+    expect(result).toEqual({
+      input: 500,
+      output: 100,
+      cacheRead: 0,
+      cacheWrite: undefined,
+      total: undefined,
+    });
   });
 });

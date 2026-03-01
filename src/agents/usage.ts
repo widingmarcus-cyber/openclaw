@@ -90,7 +90,7 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
     return undefined;
   }
 
-  const input = asFiniteNumber(
+  let input = asFiniteNumber(
     raw.input ?? raw.inputTokens ?? raw.input_tokens ?? raw.promptTokens ?? raw.prompt_tokens,
   );
   const output = asFiniteNumber(
@@ -112,6 +112,26 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
   );
   const total = asFiniteNumber(raw.total ?? raw.totalTokens ?? raw.total_tokens);
 
+  // OpenAI-format APIs include cached tokens inside prompt_tokens, while
+  // Anthropic-format APIs report them separately (cache_read_input_tokens).
+  // When input came from prompt_tokens/promptTokens (i.e. no Anthropic-style
+  // `input`/`input_tokens`/`inputTokens` was present) and cacheRead came from
+  // prompt_tokens_details or cached_tokens, subtract to avoid double-counting.
+  if (
+    input !== undefined &&
+    cacheRead !== undefined &&
+    cacheRead > 0 &&
+    raw.input === undefined &&
+    raw.inputTokens === undefined &&
+    raw.input_tokens === undefined &&
+    raw.cache_read_input_tokens === undefined &&
+    (raw.prompt_tokens !== undefined ||
+      raw.promptTokens !== undefined ||
+      raw.prompt_tokens_details?.cached_tokens !== undefined ||
+      raw.cached_tokens !== undefined)
+  ) {
+    input = Math.max(0, input - cacheRead);
+  }
   if (
     input === undefined &&
     output === undefined &&
