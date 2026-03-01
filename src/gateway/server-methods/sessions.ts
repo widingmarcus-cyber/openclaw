@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import type { GatewayClient, GatewayRequestHandlers, RespondFn } from "./types.js";
 import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { clearBootstrapSnapshot } from "../../agents/bootstrap-cache.js";
 import { abortEmbeddedPiRun, waitForEmbeddedPiRunEnd } from "../../agents/pi-embedded.js";
@@ -49,7 +50,6 @@ import {
 } from "../session-utils.js";
 import { applySessionsPatchToStore } from "../sessions-patch.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
-import type { GatewayClient, GatewayRequestHandlers, RespondFn } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
 function requireSessionKey(key: unknown, respond: RespondFn): string | null {
@@ -374,7 +374,9 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           if (sessionFile) {
             const content = fs.readFileSync(sessionFile, "utf-8");
             for (const line of content.split("\n")) {
-              if (!line.trim()) continue;
+              if (!line.trim()) {
+                continue;
+              }
               try {
                 const parsed = JSON.parse(line);
                 if (parsed.type === "message" && parsed.message) {
@@ -388,7 +390,11 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           await hookRunner.runBeforeReset(
             { sessionFile, messages, reason: commandReason },
             {
-              agentId: (target.canonicalKey ?? key).split(":")[0] ?? "main",
+              agentId: (() => {
+                const k = target.canonicalKey ?? key;
+                const parts = k.split(":");
+                return parts[0] === "agent" && parts[1] ? parts[1] : (parts[0] ?? "main");
+              })(),
               sessionKey: target.canonicalKey ?? key,
               sessionId: entry?.sessionId,
             },

@@ -6,8 +6,8 @@
  * co-locates the dual dispatch so each call site only needs one function.
  */
 
-import { createInternalHookEvent, triggerInternalHook } from "./internal-hooks.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { createInternalHookEvent, triggerInternalHook } from "./internal-hooks.js";
 
 /**
  * Emit a message_received event through both hook systems.
@@ -31,7 +31,10 @@ export function emitMessageReceived(params: {
           from: params.from,
           content: params.content,
           timestamp: params.timestamp,
-          metadata: params.metadata ?? {},
+          metadata: {
+            ...params.metadata,
+            ...(params.messageId ? { messageId: params.messageId } : {}),
+          },
         },
         {
           channelId: params.channelId,
@@ -123,9 +126,7 @@ export function emitGatewayStartup(params: {
   // Plugin hook
   const hookRunner = getGlobalHookRunner();
   if (hookRunner?.hasHooks("gateway_start")) {
-    void hookRunner
-      .runGatewayStart({ port: params.port }, { port: params.port })
-      .catch(() => {});
+    void hookRunner.runGatewayStart({ port: params.port }, { port: params.port }).catch(() => {});
   }
 
   // Internal hook — no setTimeout, fire immediately after hooks are loaded
