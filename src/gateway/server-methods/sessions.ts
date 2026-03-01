@@ -15,6 +15,7 @@ import {
   updateSessionStore,
 } from "../../config/sessions.js";
 import { unbindThreadBindingsBySessionKey } from "../../discord/monitor/thread-bindings.js";
+import { logVerbose } from "../../globals.js";
 import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import {
@@ -395,8 +396,9 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         const parts = k.split(":");
         return parts[0] === "agent" && parts[1] ? parts[1] : (parts[0] ?? "main");
       })();
-      // Fire hook async — file content is already captured above
-      void hookRunner
+      // Await hook so it finishes before archiveSessionTranscriptsForSession
+      // renames the session file (#30784)
+      await hookRunner
         .runBeforeReset(
           { sessionFile, messages, reason: commandReason },
           {
@@ -405,7 +407,9 @@ export const sessionsHandlers: GatewayRequestHandlers = {
             sessionId: entry?.sessionId,
           },
         )
-        .catch(() => {});
+        .catch((err) => {
+          logVerbose(`sessions.reset: before_reset plugin hook failed: ${String(err)}`);
+        });
     }
 
     const sessionId = entry?.sessionId;
