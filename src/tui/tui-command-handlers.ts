@@ -460,12 +460,9 @@ export function createCommandHandlers(context: CommandHandlerContext) {
           state.sessionInfo.totalTokens = null;
           tui.requestRender();
 
-          // Generate unique session key to isolate this TUI client (#39217)
-          // This ensures /new creates a fresh session that doesn't broadcast
-          // to other connected TUI clients sharing the original session key.
-          const uniqueKey = `tui-${randomUUID()}`;
-          await setSession(uniqueKey);
-          chatLog.addSystem(`new session: ${uniqueKey}`);
+          await client.resetSession(state.currentSessionKey, name);
+          chatLog.addSystem(`session ${state.currentSessionKey} reset`);
+          await loadHistory();
         } catch (err) {
           chatLog.addSystem(`new session failed: ${sanitizeRenderableText(String(err))}`);
         }

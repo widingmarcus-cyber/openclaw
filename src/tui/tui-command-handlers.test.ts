@@ -140,7 +140,7 @@ describe("tui command handlers", () => {
     );
   });
 
-  it("creates unique session for /new and resets shared session for /reset", async () => {
+  it("resets the current session for both /new and /reset", async () => {
     const loadHistory = vi.fn().mockResolvedValue(undefined);
     const setSessionMock = vi.fn().mockResolvedValue(undefined) as SetSessionMock;
     const { handleCommand, resetSession } = createHarness({
@@ -151,15 +151,11 @@ describe("tui command handlers", () => {
     await handleCommand("/new");
     await handleCommand("/reset");
 
-    // /new creates a unique session key (isolates TUI client) (#39217)
-    expect(setSessionMock).toHaveBeenCalledTimes(1);
-    expect(setSessionMock).toHaveBeenCalledWith(
-      expect.stringMatching(/^tui-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/),
-    );
-    // /reset still resets the shared session
-    expect(resetSession).toHaveBeenCalledTimes(1);
-    expect(resetSession).toHaveBeenCalledWith("agent:main:main", "reset");
-    expect(loadHistory).toHaveBeenCalledTimes(1); // /reset calls loadHistory directly; /new does so indirectly via setSession
+    expect(setSessionMock).not.toHaveBeenCalled();
+    expect(resetSession).toHaveBeenCalledTimes(2);
+    expect(resetSession).toHaveBeenNthCalledWith(1, "agent:main:main", "new");
+    expect(resetSession).toHaveBeenNthCalledWith(2, "agent:main:main", "reset");
+    expect(loadHistory).toHaveBeenCalledTimes(2);
   });
 
   it("reports send failures and marks activity status as error", async () => {
